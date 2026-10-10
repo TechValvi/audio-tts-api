@@ -19,17 +19,24 @@ def generate():
     voice = data.get('voice', 'gu-IN-DhwaniNeural')
     rate = data.get('rate', '+0%')
     pitch = data.get('pitch', '+0Hz')
+    ssml = data.get('ssml', None)
 
-    if not text:
+    if not text and not ssml:
         return jsonify({'error': 'કૃપા કરીને લખાણ દાખલ કરો.'}), 400
 
     async def get_audio_bytes():
-        communicate = edge_tts.Communicate(
-            text=text,
-            voice=voice,
-            rate=rate,
-            pitch=pitch
-        )
+        # જો ફ્રન્ટએન્ડ તરફથી એડવાન્સ્ડ SSML ફોર્મેટ આવે તો સીધું Communicate ન વાપરતા SSML મોકલવું
+        if ssml:
+            communicate = edge_tts.Communicate(text=ssml, voice=voice)
+            # edge-tts માં custom ssml મોકલવા માટે:
+            communicate.custom_ssml = True
+        else:
+            communicate = edge_tts.Communicate(
+                text=text,
+                voice=voice,
+                rate=rate,
+                pitch=pitch
+            )
         audio_stream = bytearray()
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
