@@ -80,67 +80,123 @@ def validate_pitch(value):
 
 
 
-async def generate_audio(text, voice, rate, pitch):
-    """વાક્યો પ્રમાણે MP3 બનાવી વચ્ચે વાસ્તવિક મૌન ઉમેરે છે."""
 
-    # imageio-ffmpeg દ્વારા FFmpeg બાઇનરી શોધો
+def _number_from_value(value, suffix=""):
+    """Rate અથવા pitch માંથી સંખ્યા મેળવો."""
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    match = re.search(r"[-+]?\d+(?:\.\d+)?", str(value))
+    return float(match.group()) if match else 0.0
+
+
+def _clamp(value, minimum, maximum):
+    return max(minimum, min(maximum, value))
+
+
+async def generate_audio(text, voice, rate, pitch, emotion="natural"):
+    """Edge TTS ઓડિયો બનાવે છે અને વાક્યો વચ્ચે ભાવ પ્રમાણે વિરામ ઉમેરે છે."""
+
     AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
 
-    # પ્રશ્નચિહ્ન અને પૂર્ણવિરામ સહિત વાક્યો અલગ કરો
-    sentences = re.split(
-        r'(?<=[.!?।！？])\s+',
-        text.strip()
+    text = text.strip()
+    if not text:
+        raise ValueError("ઓડિયો બનાવવા માટે લખાણ ખાલી છે.")
+
+    # Rate અને pitch ના મૂળ મૂલ્યો
+    base_rate = _number_from_value(rate)
+    base_pitch = _number_from_value(pitch)
+
+    # ભાવ પ્રમાણે વધારાનો નાનો ફેરફાર
+    emotion_adjustments = {
+        "natural":      (0, 0),
+        "friendly":     (2, 1),
+        "happy":        (4, 2),
+        "laugh":        (4, 3),
+        "excited":      (5, 3),
+        "sad":          (-5, -2),
+        "fear":         (-7, 1),
+        "warning":      (-4, -1),
+        "serious":      (-4, -1),
+        "angry":        (3, 2),
+        "question":     (-3, 3),
+        "calm":         (-6, -1),
+        "storytelling": (-4, 1),
+        "urgent":       (5, 2),
+    }
+
+    emotion = str(emotion).lower().strip()
+    rate_change, pitch_change = emotion_adjustments.get(
+        emotion, (0, 0)
     )
 
-    sentences = [
-        sentence.strip()
-        for sentence in sentences
-        if sentence.strip()
-    ]
+    # અંતિમ મૂલ્યો સુરક્ષિત મર્યાદામાં રાખો
+    final_rate = _clamp(base_rate + rate_change, -30, 30)
+    final_pitch = _clamp(base_pitch + pitch_change, -15, 15)
+
+    rate_value = f"{final_rate:+g}%"
+    pitch_value = f"{final_pitch:+g}Hz"
+
+    # વાક્યોને તેમના અંતિમ punctuation સાથે અલગ કરો
+    sentences = re.findall(
+        r".+?(?:[?!।.!！？]+(?=\s|$)|$)",
+        text,
+        flags=re.DOTALL
+    )
+
+    sentences = [s.strip() for s in sentences if s.strip()]
 
     if not sentences:
-        raise ValueError("ઓડિયો બનાવવા માટે લખાણ ખાલી છે.")
+        sentences = [text]
 
     combined_audio = AudioSegment.empty()
 
     for index, sentence in enumerate(sentences):
-        audio_part = io.BytesIO()
+        audio_buffer = io.BytesIO()
 
         communicate = edge_tts.Communicate(
             text=sentence,
             voice=voice,
-            rate=rate,
-            pitch=pitch,
+            rate=rate_value,
+            pitch=pitch_value,
         )
 
         async for chunk in communicate.stream():
             if chunk.get("type") == "audio":
-                audio_part.write(chunk["data"])
+                audio_buffer.write(chunk["data"])
 
-        if audio_part.tell() == 0:
-            raise RuntimeError("વાક્ય માટે ઓડિયો મળ્યો નથી.")
+        if audio_buffer.getbuffer().nbytes == 0:
+            raise RuntimeError(
+                f"વાક્ય {index + 1} માટે ઓડિયો મળ્યો નથી."
+            )
 
-        audio_part.seek(0)
+        audio_buffer.seek(0)
 
         sentence_audio = AudioSegment.from_file(
-            audio_part,
+            audio_buffer,
             format="mp3"
         )
 
         combined_audio += sentence_audio
 
-        # છેલ્લું વાક્ય ન હોય ત્યારે વિરામ ઉમેરો
+        # દરેક વાક્યના અંતે યોગ્ય વિરામ
         if index < len(sentences) - 1:
-            ending = sentence[-1]
+            ending = sentence.rstrip()[-1]
 
             if ending in ("?", "？"):
-                pause_ms = 650
+                pause_ms = 700
             elif ending in ("!", "！"):
-                pause_ms = 500
+                pause_ms = 550
             elif ending in ("।", "."):
-                pause_ms = 450
+                pause_ms = 500
             else:
-                pause_ms = 300
+                pause_ms = 350
+
+            # ભાવ પ્રમાણે થોડો વધારાનો વિરામ
+            if emotion in ("fear", "storytelling", "calm"):
+                pause_ms += 200
+            elif emotion in ("urgent", "excited"):
+                pause_ms = max(250, pause_ms - 150)
 
             combined_audio += AudioSegment.silent(
                 duration=pause_ms,
@@ -158,7 +214,7 @@ async def generate_audio(text, voice, rate, pitch):
     output_buffer.seek(0)
 
     if output_buffer.getbuffer().nbytes == 0:
-        raise RuntimeError("TTS સર્વરે ખાલી ઓડિયો આપ્યો.")
+        raise RuntimeError("ઓડિયો ફાઇલ બનાવી શકાઈ નથી.")
 
     return output_buffer
 
@@ -324,13 +380,14 @@ def generate():
     # 7. MP3 ઓડિયો બનાવો
     try:
         audio_buffer = asyncio.run(
-            generate_audio(
-                text,
-                voice,
-                rate,
-                pitch
-            )
-        )
+    generate_audio(
+        text=text,
+        voice=voice,
+        rate=rate,
+        pitch=pitch,
+        emotion=emotion
+    )
+)
 
         response = send_file(
             audio_buffer,
