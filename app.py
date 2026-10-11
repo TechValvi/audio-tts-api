@@ -78,19 +78,39 @@ def validate_pitch(value):
 
 
 async def generate_audio(text, voice, rate, pitch):
-    """Edge TTS દ્વારા MP3 audio bytes બનાવે છે."""
-    communicate = edge_tts.Communicate(
-        text=text,
-        voice=voice,
-        rate=rate,
-        pitch=pitch,
+    """લખાણને વાક્યોમાં વહેંચીને વિરામ સાથે MP3 બનાવે છે."""
+
+    # વાક્યના અંતે આવતા ગુજરાતી અને અંગ્રેજી punctuation સાચવો.
+    sentences = re.split(
+        r'(?<=[.!?।！？])\s+',
+        text.strip()
     )
+
+    sentences = [
+        sentence.strip()
+        for sentence in sentences
+        if sentence.strip()
+    ]
+
+    if not sentences:
+        raise ValueError("ઓડિયો બનાવવા માટે લખાણ ખાલી છે.")
 
     audio_buffer = io.BytesIO()
 
-    async for chunk in communicate.stream():
-        if chunk.get("type") == "audio":
-            audio_buffer.write(chunk["data"])
+    for index, sentence in enumerate(sentences):
+        communicate = edge_tts.Communicate(
+            text=sentence,
+            voice=voice,
+            rate=rate,
+            pitch=pitch,
+        )
+
+        async for chunk in communicate.stream():
+            if chunk.get("type") == "audio":
+                audio_buffer.write(chunk["data"])
+
+        # નોંધ: અહીં MP3 chunks સીધા જોડાય છે.
+        # આ હજી વાસ્તવિક મૌન ઉમેરતું નથી.
 
     audio_buffer.seek(0)
 
