@@ -98,7 +98,22 @@ async def generate_audio(text, voice, rate, pitch):
         raise RuntimeError("TTS સર્વરે ખાલી ઓડિયો આપ્યો.")
 
     return audio_buffer
+def prepare_gujarati_text(text):
+    text = text.strip()
 
+    # વધારાની જગ્યાઓ દૂર કરો
+    text = re.sub(r"[ \t]+", " ", text)
+
+    # વિરામચિહ્ન પહેલાંની વધારાની જગ્યા દૂર કરો
+    text = re.sub(r"\s+([?!.।,])", r"\1", text)
+
+    # વિરામચિહ્ન પછી જગ્યા રાખો
+    text = re.sub(r"([?!.।])\s*", r"\1 ", text)
+
+    # વધારાની જગ્યાઓ દૂર કરો
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
