@@ -1,105 +1,231 @@
 
-import os
-import io
 import asyncio
+import io
 import logging
+import os
+import re
 
-from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
 import edge_tts
+from flask import Flask, jsonify, request, send_file
 
 app = Flask(__name__)
-CORS(app)
+
+# --------------------------------------------------
+# TechValvi Voice Studio
+# Gujarati + Hindi + English Text-to-Speech API
+# --------------------------------------------------
+
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024  # 100 KB
+MAX_TEXT_LENGTH = 5000
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("techvalvi-voice")
+
+# ભાષા પ્રમાણે મંજૂર વોઇસ
+VOICE_LANGUAGE = {
+    "gu-IN-DhwaniNeural": "gu",
+    "gu-IN-NiranjanNeural": "gu",
+
+    "hi-IN-SwaraNeural": "hi",
+    "hi-IN-MadhurNeural": "hi",
+
+    "en-IN-NeerjaNeural": "en",
+    "en-IN-PrabhatNeural": "en",
+}
 
 DEFAULT_VOICE = "gu-IN-DhwaniNeural"
-MAX_TEXT_LENGTH = 5000
+
+RATE_PATTERN = re.compile(r"^([+-]?\d{1,2})%$")
+PITCH_PATTERN = re.compile(r"^([+-]?\d{1,2})Hz$")
+
+
+def json_error(message, status=400):
+    return jsonify({"error": message}), status
+
+
+def validate_rate(value):
+    if not isinstance(value, str):
+        raise ValueError("સ્પીડનું ફોર્મેટ અમાન્ય છે.")
+
+    match = RATE_PATTERN.fullmatch(value.strip())
+
+    if not match:
+        raise ValueError("સ્પીડ +0% જેવા ફોર્મેટમાં આપો.")
+
+    number = int(match.group(1))
+
+    if not -40 <= number <= 40:
+        raise ValueError("સ્પીડ -40% થી +40% વચ્ચે હોવી જોઈએ.")
+
+    return f"{number:+d}%"
+
+
+def validate_pitch(value):
+    if not isinstance(value, str):
+        raise ValueError("પિચનું ફોર્મેટ અમાન્ય છે.")
+
+    match = PITCH_PATTERN.fullmatch(value.strip())
+
+    if not match:
+        raise ValueError("પિચ +0Hz જેવા ફોર્મેટમાં આપો.")
+
+    number = int(match.group(1))
+
+    if not -20 <= number <= 20:
+        raise ValueError("પિચ -20Hz થી +20Hz વચ્ચે હોવી જોઈએ.")
+
+    return f"{number:+d}Hz"
+
+
+async def generate_audio(text, voice, rate, pitch):
+    """Edge TTS દ્વારા MP3 audio bytes બનાવે છે."""
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=voice,
+        rate=rate,
+        pitch=pitch,
+    )
+
+    audio_buffer = io.BytesIO()
+
+    async for chunk in communicate.stream():
+        if chunk.get("type") == "audio":
+            audio_buffer.write(chunk["data"])
+
+    audio_buffer.seek(0)
+
+    if audio_buffer.getbuffer().nbytes == 0:
+        raise RuntimeError("TTS સર્વરે ખાલી ઓડિયો આપ્યો.")
+
+    return audio_buffer
 
 
 @app.route("/", methods=["GET"])
-def health():
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Render health check."""
     return jsonify({
-        "status": "ok",
-        "message": "TechValvi Voice API is running"
+        "service": "TechValvi Voice Studio API",
+        "status": "online",
+        "languages": ["Gujarati", "Hindi", "English"],
+        "endpoint": "/generate",
+        "method": "POST",
     }), 200
 
 
 @app.route("/generate", methods=["POST"])
 def generate():
+    """લખાણમાંથી MP3 બનાવે છે."""
+
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
-        return jsonify({
-            "error": "માન્ય JSON ડેટા મોકલો."
-        }), 400
+        return json_error(
+            "માન્ય JSON request મોકલો.",
+            400
+        )
 
-    text = str(data.get("text") or "").strip()
-    voice = str(data.get("voice") or DEFAULT_VOICE).strip()
-    rate = str(data.get("rate") or "+0%").strip()
-    pitch = str(data.get("pitch") or "+0Hz").strip()
+    text = data.get("text", "")
+    voice = data.get("voice", DEFAULT_VOICE)
 
-    # edge-tts custom SSML સ્વીકારતું નથી.
-    # તેથી ssml field ને સીધું TTS માં મોકલતા નથી.
-    if not text:
-        return jsonify({
-            "error": "કૃપા કરીને બોલવાનું લખાણ દાખલ કરો."
-        }), 400
+    if not isinstance(text, str) or not text.strip():
+        return json_error(
+            "કૃપા કરીને લખાણ દાખલ કરો.",
+            400
+        )
+
+    text = text.strip()
 
     if len(text) > MAX_TEXT_LENGTH:
-        return jsonify({
-            "error": f"લખાણ {MAX_TEXT_LENGTH} અક્ષરથી ઓછું રાખો."
-        }), 400
-
-    # સામાન્ય લખાણ અને યોગ્ય voice જ વાપરો.
-    if not voice.endswith("Neural") or len(voice) > 100:
-        return jsonify({
-            "error": "Voice પસંદગી યોગ્ય નથી."
-        }), 400
-
-    async def create_audio():
-        communicate = edge_tts.Communicate(
-            text=text,
-            voice=voice,
-            rate=rate,
-            pitch=pitch
+        return json_error(
+            f"લખાણ મહત્તમ {MAX_TEXT_LENGTH} અક્ષરનું હોવું જોઈએ.",
+            413
         )
 
-        audio = bytearray()
+    if not isinstance(voice, str) or voice not in VOICE_LANGUAGE:
+        return json_error(
+            "પસંદ કરેલો વોઇસ મંજૂર નથી.",
+            400
+        )
 
-        async for chunk in communicate.stream():
-            if chunk.get("type") == "audio":
-                audio.extend(chunk["data"])
+    # ભાષા અને પસંદ કરેલા વોઇસ વચ્ચે મેળ ચકાસવો
+    language = data.get("language")
 
-        if not audio:
-            raise RuntimeError(
-                "TTS તરફથી ઓડિયો મળ્યો નથી."
+    if language is not None:
+        if not isinstance(language, str):
+            return json_error("ભાષાની પસંદગી અમાન્ય છે.", 400)
+
+        if language not in ("gu", "hi", "en"):
+            return json_error("ભાષા gu, hi અથવા en હોવી જોઈએ.", 400)
+
+        if VOICE_LANGUAGE[voice] != language:
+            return json_error(
+                "પસંદ કરેલો વોઇસ અને ભાષા એકબીજા સાથે મેળ ખાતા નથી.",
+                400
             )
-
-        return bytes(audio)
 
     try:
-        audio_data = asyncio.run(create_audio())
+        rate = validate_rate(data.get("rate", "+0%"))
+        pitch = validate_pitch(data.get("pitch", "+0Hz"))
+    except ValueError as error:
+        return json_error(str(error), 400)
 
-        return send_file(
-            io.BytesIO(audio_data),
-            mimetype="audio/mpeg",
-            as_attachment=False,
-            download_name="speech.mp3"
+    # Emotion preset speed/pitch માટે છે.
+    # Edge TTS દરેક વોઇસમાં સાચી ભાવનાત્મક અભિવ્યક્તિની ખાતરી આપતું નથી.
+    emotion = data.get("emotion", "natural")
+
+    if not isinstance(emotion, str) or len(emotion) > 30:
+        return json_error("ઇમોશન સેટિંગ અમાન્ય છે.", 400)
+
+    try:
+        audio_buffer = asyncio.run(
+            generate_audio(text, voice, rate, pitch)
         )
 
-    except Exception:
-        logger.exception("Audio generation failed")
+        response = send_file(
+            audio_buffer,
+            mimetype="audio/mpeg",
+            as_attachment=False,
+            download_name="techvalvi-voice.mp3",
+            max_age=0,
+        )
 
-        return jsonify({
-            "error": (
-                "ઓડિયો જનરેટ થઈ શક્યો નથી. "
-                "થોડી વાર પછી ફરી પ્રયાસ કરો."
-            )
-        }), 502
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+
+        return response
+
+    except Exception:
+        logger.exception(
+            "TTS generation failed for voice %s",
+            voice
+        )
+
+        return json_error(
+            "ઓડિયો બનાવી શકાયો નથી. વોઇસની ઉપલબ્ધતા અને સર્વર લોગ તપાસો.",
+            502
+        )
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return json_error(
+        "Requestનું કદ મંજૂર મર્યાદા કરતાં વધારે છે.",
+        413
+    )
+
+
+@app.errorhandler(404)
+def not_found(_error):
+    return json_error("આ API endpoint મળ્યો નથી.", 404)
+
+
+@app.errorhandler(405)
+def method_not_allowed(_error):
+    return json_error("આ HTTP method મંજૂર નથી.", 405)
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    # સ્થાનિક પરીક્ષણ માટે; Renderમાં Gunicorn વાપરો.
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
