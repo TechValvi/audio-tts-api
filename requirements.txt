@@ -2,3 +2,5 @@ flask
 flask-cors
 edge-tts
 gunicorn
+pydub
+imageio-ffmpeg
