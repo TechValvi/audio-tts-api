@@ -4,6 +4,8 @@ import io
 import logging
 import os
 import re
+from pydub import AudioSegment
+import imageio_ffmpeg
 
 import edge_tts
 from flask import Flask, jsonify, request, send_file
@@ -77,10 +79,14 @@ def validate_pitch(value):
     return f"{number:+d}Hz"
 
 
-async def generate_audio(text, voice, rate, pitch):
-    """લખાણને વાક્યોમાં વહેંચીને વિરામ સાથે MP3 બનાવે છે."""
 
-    # વાક્યના અંતે આવતા ગુજરાતી અને અંગ્રેજી punctuation સાચવો.
+async def generate_audio(text, voice, rate, pitch):
+    """વાક્યો પ્રમાણે MP3 બનાવી વચ્ચે વાસ્તવિક મૌન ઉમેરે છે."""
+
+    # imageio-ffmpeg દ્વારા FFmpeg બાઇનરી શોધો
+    AudioSegment.converter = imageio_ffmpeg.get_ffmpeg_exe()
+
+    # પ્રશ્નચિહ્ન અને પૂર્ણવિરામ સહિત વાક્યો અલગ કરો
     sentences = re.split(
         r'(?<=[.!?।！？])\s+',
         text.strip()
@@ -95,9 +101,11 @@ async def generate_audio(text, voice, rate, pitch):
     if not sentences:
         raise ValueError("ઓડિયો બનાવવા માટે લખાણ ખાલી છે.")
 
-    audio_buffer = io.BytesIO()
+    combined_audio = AudioSegment.empty()
 
     for index, sentence in enumerate(sentences):
+        audio_part = io.BytesIO()
+
         communicate = edge_tts.Communicate(
             text=sentence,
             voice=voice,
@@ -107,17 +115,53 @@ async def generate_audio(text, voice, rate, pitch):
 
         async for chunk in communicate.stream():
             if chunk.get("type") == "audio":
-                audio_buffer.write(chunk["data"])
+                audio_part.write(chunk["data"])
 
-        # નોંધ: અહીં MP3 chunks સીધા જોડાય છે.
-        # આ હજી વાસ્તવિક મૌન ઉમેરતું નથી.
+        if audio_part.tell() == 0:
+            raise RuntimeError("વાક્ય માટે ઓડિયો મળ્યો નથી.")
 
-    audio_buffer.seek(0)
+        audio_part.seek(0)
 
-    if audio_buffer.getbuffer().nbytes == 0:
+        sentence_audio = AudioSegment.from_file(
+            audio_part,
+            format="mp3"
+        )
+
+        combined_audio += sentence_audio
+
+        # છેલ્લું વાક્ય ન હોય ત્યારે વિરામ ઉમેરો
+        if index < len(sentences) - 1:
+            ending = sentence[-1]
+
+            if ending in ("?", "？"):
+                pause_ms = 650
+            elif ending in ("!", "！"):
+                pause_ms = 500
+            elif ending in ("।", "."):
+                pause_ms = 450
+            else:
+                pause_ms = 300
+
+            combined_audio += AudioSegment.silent(
+                duration=pause_ms,
+                frame_rate=24000
+            )
+
+    output_buffer = io.BytesIO()
+
+    combined_audio.export(
+        output_buffer,
+        format="mp3",
+        bitrate="48k"
+    )
+
+    output_buffer.seek(0)
+
+    if output_buffer.getbuffer().nbytes == 0:
         raise RuntimeError("TTS સર્વરે ખાલી ઓડિયો આપ્યો.")
 
-    return audio_buffer
+    return output_buffer
+
 def prepare_gujarati_text(text):
     """ગુજરાતી TTS માટે લખાણ અને વાક્યવિરામ સુધારે છે."""
 
