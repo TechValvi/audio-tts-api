@@ -119,21 +119,39 @@ async def generate_audio(text, voice, rate, pitch):
 
     return audio_buffer
 def prepare_gujarati_text(text):
+    """ગુજરાતી TTS માટે લખાણ અને વાક્યવિરામ સુધારે છે."""
+
+    if not isinstance(text, str):
+        return ""
+
+    # વધારાની ખાલી જગ્યાઓ દૂર કરો
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
 
-    # વધારાની જગ્યાઓ દૂર કરો
-    text = re.sub(r"[ \t]+", " ", text)
+    if not text:
+        return ""
 
-    # વિરામચિહ્ન પહેલાંની વધારાની જગ્યા દૂર કરો
-    text = re.sub(r"\s+([?!.।,])", r"\1", text)
+    # પ્રશ્નચિહ્ન પહેલાંની બિનજરૂરી જગ્યાઓ દૂર કરો
+    text = re.sub(r"\s+([?!,;:।])", r"\1", text)
 
-    # વિરામચિહ્ન પછી જગ્યા રાખો
-    text = re.sub(r"([?!.।])\s*", r"\1 ", text)
+    # પ્રશ્નચિહ્ન પછી જગ્યા ન હોય તો ઉમેરો
+    text = re.sub(r"([?!])(?=[^\s?!])", r"\1 ", text)
 
-    # વધારાની જગ્યાઓ દૂર કરો
-    text = re.sub(r"\s+", " ", text).strip()
+    # પૂર્ણવિરામ પછી જગ્યા ન હોય તો ઉમેરો
+    text = re.sub(r"([।])(?=[^\s])", r"\1 ", text)
 
-    return text
+    # એકસાથે આવેલા અનેક પ્રશ્નચિહ્નોને એકમાં ફેરવો
+    text = re.sub(r"\?{2,}", "?", text)
+
+    # સતત આવેલા અનેક આશ્ચર્યચિહ્નોને એકમાં ફેરવો
+    text = re.sub(r"!{2,}", "!", text)
+
+    # વધારાની જગ્યાઓ ફરીથી દૂર કરો
+    text = re.sub(r" {2,}", " ", text)
+
+    return text.strip()
+
 
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
