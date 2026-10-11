@@ -188,10 +188,24 @@ def generate():
 
     # Emotion preset speed/pitch માટે છે.
     # Edge TTS દરેક વોઇસમાં સાચી ભાવનાત્મક અભિવ્યક્તિની ખાતરી આપતું નથી.
+   
+    # પસંદ કરેલી લાગણી મેળવો
     emotion = data.get("emotion", "natural")
 
-    if not isinstance(emotion, str) or len(emotion) > 30:
-        return json_error("ઇમોશન સેટિંગ અમાન્ય છે.", 400)
+    ALLOWED_EMOTIONS = {
+    "natural", "friendly", "happy", "laugh",
+    "excited", "sad", "fear", "warning",
+    "serious", "angry", "question", "calm",
+    "storytelling", "urgent"
+    }
+
+if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
+    return json_error("ઇમોશન સેટિંગ અમાન્ય છે.", 400)
+
+logger.info(
+    "TTS request: voice=%s, emotion=%s, rate=%s, pitch=%s",
+    voice, emotion, rate, pitch
+)
 
     try:
         audio_buffer = asyncio.run(
