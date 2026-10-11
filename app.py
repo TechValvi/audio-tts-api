@@ -129,22 +129,32 @@ def health_check():
 
 
 @app.route("/generate", methods=["POST"])
+
 def generate():
     """લખાણમાંથી MP3 બનાવે છે."""
 
     data = request.get_json(silent=True)
 
+    # 1. JSON request તપાસો
     if not isinstance(data, dict):
         return json_error(
             "માન્ય JSON request મોકલો.",
             400
         )
 
+    # 2. લખાણ અને વોઇસ મેળવો
     text = data.get("text", "")
     voice = data.get("voice", DEFAULT_VOICE)
+
+    if not isinstance(text, str):
+        return json_error(
+            "લખાણ યોગ્ય ફોર્મેટમાં મોકલો.",
+            400
+        )
+
     text = prepare_gujarati_text(text)
 
-    if not isinstance(text, str) or not text.strip():
+    if not text.strip():
         return json_error(
             "કૃપા કરીને લખાણ દાખલ કરો.",
             400
@@ -158,21 +168,28 @@ def generate():
             413
         )
 
+    # 3. વોઇસ તપાસો
     if not isinstance(voice, str) or voice not in VOICE_LANGUAGE:
         return json_error(
             "પસંદ કરેલો વોઇસ મંજૂર નથી.",
             400
         )
 
-    # ભાષા અને પસંદ કરેલા વોઇસ વચ્ચે મેળ ચકાસવો
+    # 4. ભાષા આપવામાં આવી હોય તો વોઇસ સાથે મેળ તપાસો
     language = data.get("language")
 
     if language is not None:
         if not isinstance(language, str):
-            return json_error("ભાષાની પસંદગી અમાન્ય છે.", 400)
+            return json_error(
+                "ભાષાની પસંદગી અમાન્ય છે.",
+                400
+            )
 
         if language not in ("gu", "hi", "en"):
-            return json_error("ભાષા gu, hi અથવા en હોવી જોઈએ.", 400)
+            return json_error(
+                "ભાષા gu, hi અથવા en હોવી જોઈએ.",
+                400
+            )
 
         if VOICE_LANGUAGE[voice] != language:
             return json_error(
@@ -180,44 +197,57 @@ def generate():
                 400
             )
 
-    
-        # લાગણી અને તેની સેટિંગ્સ મેળવો
-        emotion = data.get("emotion", "natural")
+    # 5. ઇમોશન તપાસો
+    emotion = data.get("emotion", "natural")
 
-        ALLOWED_EMOTIONS = {
-            "natural", "friendly", "happy", "laugh",
-            "excited", "sad", "fear", "warning",
-            "serious", "angry", "question", "calm",
-            "storytelling", "urgent"
-        }
+    ALLOWED_EMOTIONS = {
+        "natural", "friendly", "happy", "laugh",
+        "excited", "sad", "fear", "warning",
+        "serious", "angry", "question", "calm",
+        "storytelling", "urgent"
+    }
 
-        if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
-            return json_error("ઇમોશન સેટિંગ અમાન્ય છે.", 400)
-
-        try:
-            # Frontendમાંથી મળેલી rate અને pitch સેટિંગ્સ
-            raw_rate = data.get("rate", 0)
-            raw_pitch = data.get("pitch", "+0Hz")
-
-            # JSON rate સંખ્યા હોય તો Edge TTS ફોર્મેટમાં ફેરવો
-            if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool):
-                raw_rate = f"{raw_rate:+g}%"
-
-            rate = validate_rate(raw_rate)
-            pitch = validate_pitch(raw_pitch)
-
-        except (ValueError, TypeError) as error:
-            return json_error(str(error), 400)
-
-        logger.info(
-            "TTS request: emotion=%s, rate=%s, pitch=%s",
-            emotion, rate, pitch
+    if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
+        return json_error(
+            "ઇમોશન સેટિંગ અમાન્ય છે.",
+            400
         )
 
+    # 6. Rate અને Pitch સેટ કરો
+    try:
+        raw_rate = data.get("rate", 0)
+        raw_pitch = data.get("pitch", "+0Hz")
 
+        # Frontend numeric rate મોકલે તો તેને Edge TTS ફોર્મેટમાં ફેરવો
+        if (
+            isinstance(raw_rate, (int, float))
+            and not isinstance(raw_rate, bool)
+        ):
+            raw_rate = f"{raw_rate:+g}%"
+
+        rate = validate_rate(raw_rate)
+        pitch = validate_pitch(raw_pitch)
+
+    except (ValueError, TypeError) as error:
+        return json_error(
+            str(error),
+            400
+        )
+
+    logger.info(
+        "TTS request: voice=%s, emotion=%s, rate=%s, pitch=%s",
+        voice, emotion, rate, pitch
+    )
+
+    # 7. MP3 ઓડિયો બનાવો
     try:
         audio_buffer = asyncio.run(
-            generate_audio(text, voice, rate, pitch)
+            generate_audio(
+                text,
+                voice,
+                rate,
+                pitch
+            )
         )
 
         response = send_file(
