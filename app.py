@@ -180,32 +180,40 @@ def generate():
                 400
             )
 
-    try:
-        rate = validate_rate(data.get("rate", "+0%"))
-        pitch = validate_pitch(data.get("pitch", "+0Hz"))
-    except ValueError as error:
-        return json_error(str(error), 400)
+    
+        # લાગણી અને તેની સેટિંગ્સ મેળવો
+        emotion = data.get("emotion", "natural")
 
-    # Emotion preset speed/pitch માટે છે.
-    # Edge TTS દરેક વોઇસમાં સાચી ભાવનાત્મક અભિવ્યક્તિની ખાતરી આપતું નથી.
-   
-    # પસંદ કરેલી લાગણી મેળવો
-emotion = data.get("emotion", "natural")
+        ALLOWED_EMOTIONS = {
+            "natural", "friendly", "happy", "laugh",
+            "excited", "sad", "fear", "warning",
+            "serious", "angry", "question", "calm",
+            "storytelling", "urgent"
+        }
 
-ALLOWED_EMOTIONS = {
-    "natural", "friendly", "happy", "laugh",
-    "excited", "sad", "fear", "warning",
-    "serious", "angry", "question", "calm",
-    "storytelling", "urgent"
-    }
+        if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
+            return json_error("ઇમોશન સેટિંગ અમાન્ય છે.", 400)
 
-if not isinstance(emotion, str) or emotion not in ALLOWED_EMOTIONS:
-    return json_error("ઇમોશન સેટિંગ અમાન્ય છે.", 400)
+        try:
+            # Frontendમાંથી મળેલી rate અને pitch સેટિંગ્સ
+            raw_rate = data.get("rate", 0)
+            raw_pitch = data.get("pitch", "+0Hz")
 
-logger.info(
-    "TTS request: voice=%s, emotion=%s, rate=%s, pitch=%s",
-    voice, emotion, rate, pitch
-)
+            # JSON rate સંખ્યા હોય તો Edge TTS ફોર્મેટમાં ફેરવો
+            if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool):
+                raw_rate = f"{raw_rate:+g}%"
+
+            rate = validate_rate(raw_rate)
+            pitch = validate_pitch(raw_pitch)
+
+        except (ValueError, TypeError) as error:
+            return json_error(str(error), 400)
+
+        logger.info(
+            "TTS request: emotion=%s, rate=%s, pitch=%s",
+            emotion, rate, pitch
+        )
+
 
     try:
         audio_buffer = asyncio.run(
