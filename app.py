@@ -190,9 +190,9 @@ def generate():
     # Edge TTS દરેક વોઇસમાં સાચી ભાવનાત્મક અભિવ્યક્તિની ખાતરી આપતું નથી.
    
     # પસંદ કરેલી લાગણી મેળવો
-    emotion = data.get("emotion", "natural")
+emotion = data.get("emotion", "natural")
 
-    ALLOWED_EMOTIONS = {
+ALLOWED_EMOTIONS = {
     "natural", "friendly", "happy", "laugh",
     "excited", "sad", "fear", "warning",
     "serious", "angry", "question", "calm",
