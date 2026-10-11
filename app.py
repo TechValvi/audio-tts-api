@@ -142,6 +142,7 @@ def generate():
 
     text = data.get("text", "")
     voice = data.get("voice", DEFAULT_VOICE)
+    text = prepare_gujarati_text(text)
 
     if not isinstance(text, str) or not text.strip():
         return json_error(
