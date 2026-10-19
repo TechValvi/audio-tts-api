@@ -5,3 +5,5 @@ gunicorn
 pydub
 imageio-ffmpeg
 audioop-lts
+git+https://github.com/rany2/edge-tts.git
+gTTS
