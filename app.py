@@ -4,12 +4,14 @@ import re
 import asyncio
 import logging
 from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 from pydub import AudioSegment
 import imageio_ffmpeg
 import edge_tts
 from gtts import gTTS
 
 app = Flask(__name__)
+CORS(app)  # આ લાઇનથી techvalvi.com પરથી કોઈપણ CORS એરર નહીં આવે
 
 # --------------------------------------------------
 # TechValvi Voice Studio
@@ -142,7 +144,7 @@ async def generate_audio(text, voice, rate, pitch, emotion="natural"):
         pitch_value = f"{final_pitch:+g}Hz"
 
         sentences = re.findall(
-            r".+?(?:[?!।.!！？]+(?=\s|$)\vert{}$)",
+            r".+?(?:[?!।.!！？]+(?=\s|$)|$)",
             text,
             flags=re.DOTALL
         )
@@ -340,4 +342,9 @@ def not_found(_error):
 
 @app.errorhandler(405)
 def method_not_allowed(_error):
-    return json_error("આ HTTP method
+    return json_error("આ HTTP method મંજૂર નથી.", 405)
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
