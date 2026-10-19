@@ -3,6 +3,5 @@ flask-cors
 gunicorn
 pydub
 imageio-ffmpeg
-audioop-lts
 gTTS
-git+https://github.com/rany2/edge-tts.git
+edge-tts
