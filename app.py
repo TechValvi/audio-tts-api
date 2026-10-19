@@ -11,7 +11,7 @@ import edge_tts
 from gtts import gTTS
 
 app = Flask(__name__)
-CORS(app)  # આ લાઇનથી techvalvi.com પરથી કોઈપણ CORS એરર નહીં આવે
+CORS(app)
 
 # --------------------------------------------------
 # TechValvi Voice Studio
@@ -24,14 +24,12 @@ MAX_TEXT_LENGTH = 5000
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("techvalvi-voice")
 
-# FFmpeg પાથ કન્ફિગરેશન
 try:
     ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
     AudioSegment.converter = ffmpeg_exe
 except Exception as e:
     logger.warning("FFmpeg પાથ સેટ કરવામાં ચેતવણી: %s", e)
 
-# ભાષા પ્રમાણે મંજૂર વોઇસ
 VOICE_LANGUAGE = {
     "gu-IN-DhwaniNeural": "gu",
     "gu-IN-NiranjanNeural": "gu",
@@ -82,10 +80,8 @@ def validate_pitch(value):
 
 
 def _number_from_value(value, suffix=""):
-    """Rate અથવા pitch માંથી સંખ્યા મેળવો."""
     if isinstance(value, (int, float)):
         return float(value)
-
     match = re.search(r"[-+]?\d+(?:\.\d+)?", str(value))
     return float(match.group()) if match else 0.0
 
@@ -95,8 +91,8 @@ def _clamp(value, minimum, maximum):
 
 
 def generate_audio_gtts_fallback(text, voice):
-    """Edge-TTS બ્લોક થાય ત્યારે Google TTS દ્વારા સુરક્ષિત ઓડિયો બનાવે છે."""
-    logger.info("Edge-TTS ફેલ થવાથી gTTS ફોલબેક મોડ શરૂ થાય છે...")
+    """Edge-TTS બ્લોક થાય ત્યારે Google TTS દ્વારા ઓડિયો બનાવે છે."""
+    logger.info("Edge-TTS ફેલ થયું. gTTS ફોલબેક શરૂ થઈ રહ્યું છે...")
     lang = VOICE_LANGUAGE.get(voice, "gu")
     
     tts = gTTS(text=text, lang=lang, slow=False)
@@ -107,8 +103,6 @@ def generate_audio_gtts_fallback(text, voice):
 
 
 async def generate_audio(text, voice, rate, pitch, emotion="natural"):
-    """Edge TTS ઓડિયો બનાવે છે અને ફેલ થાય તો gTTS પર સ્વિચ થાય છે."""
-
     text = text.strip()
     if not text:
         raise ValueError("ઓડિયો બનાવવા માટે લખાણ ખાલી છે.")
@@ -174,7 +168,6 @@ async def generate_audio(text, voice, rate, pitch, emotion="natural"):
             sentence_audio = AudioSegment.from_file(audio_buffer, format="mp3")
             combined_audio += sentence_audio
 
-            # વાક્યના અંતે વિરામ
             if index < len(sentences) - 1:
                 ending = sentence.rstrip()[-1]
                 if ending in ("?", "？"):
@@ -202,36 +195,30 @@ async def generate_audio(text, voice, rate, pitch, emotion="natural"):
         return output_buffer
 
     except Exception as edge_err:
-        logger.warning("Edge-TTS માં એરર આવી (%s). gTTS પર સ્વિચ થઈ રહ્યું છે...", edge_err)
+        logger.warning("Edge-TTS એરર (%s). gTTS સ્વિચ થાય છે...", edge_err)
         return generate_audio_gtts_fallback(text, voice)
 
 
 def prepare_gujarati_text(text):
-    """ગુજરાતી TTS માટે લખાણ અને વાક્યવિરામ સુધારે છે."""
     if not isinstance(text, str):
         return ""
-
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
-
     if not text:
         return ""
-
     text = re.sub(r"\s+([?!,;:।])", r"\1", text)
     text = re.sub(r"([?!])(?=[^\s?!])", r"\1 ", text)
     text = re.sub(r"([।])(?=[^\s])", r"\1 ", text)
     text = re.sub(r"\?{2,}", "?", text)
     text = re.sub(r"!{2,}", "!", text)
     text = re.sub(r" {2,}", " ", text)
-
     return text.strip()
 
 
 @app.route("/", methods=["GET"])
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Render health check."""
     return jsonify({
         "service": "TechValvi Voice Studio API",
         "status": "online",
@@ -243,9 +230,7 @@ def health_check():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    """લખાણમાંથી MP3 બનાવે છે."""
     data = request.get_json(silent=True)
-
     if not isinstance(data, dict):
         return json_error("માન્ય JSON request મોકલો.", 400)
 
@@ -256,7 +241,6 @@ def generate():
         return json_error("લખાણ યોગ્ય ફોર્મેટમાં મોકલો.", 400)
 
     text = prepare_gujarati_text(text)
-
     if not text.strip():
         return json_error("કૃપા કરીને લખાણ દાખલ કરો.", 400)
 
@@ -270,12 +254,10 @@ def generate():
     if language is not None:
         if not isinstance(language, str):
             return json_error("ભાષાની પસંદગી અમાન્ય છે.", 400)
-
         if language not in ("gu", "hi", "en"):
             return json_error("ભાષા gu, hi અથવા en હોવી જોઈએ.", 400)
-
         if VOICE_LANGUAGE[voice] != language:
-            return json_error("પસંદ કરેલો વોઇસ અને ભાષા એકબીજા સાથે મેળ ખાતા નથી.", 400)
+            return json_error("પસંદ કરેલો વોઇસ અને ભાષા મેળ ખાતા નથી.", 400)
 
     emotion = data.get("emotion", "natural")
     ALLOWED_EMOTIONS = {
@@ -291,13 +273,11 @@ def generate():
     try:
         raw_rate = data.get("rate", 0)
         raw_pitch = data.get("pitch", "+0Hz")
-
         if isinstance(raw_rate, (int, float)) and not isinstance(raw_rate, bool):
             raw_rate = f"{raw_rate:+g}%"
 
         rate = validate_rate(raw_rate)
         pitch = validate_pitch(raw_pitch)
-
     except (ValueError, TypeError) as error:
         return json_error(str(error), 400)
 
