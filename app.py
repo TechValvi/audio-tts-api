@@ -19,7 +19,7 @@ CORS(app)
 # --------------------------------------------------
 
 app.config["MAX_CONTENT_LENGTH"] = 100 * 1024  # 100 KB
-MAX_TEXT_LENGTH = 5000
+MAX_TEXT_LENGTH = 1000
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("techvalvi-voice")
@@ -326,5 +326,5 @@ def method_not_allowed(_error):
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5000"))
+    port = int(os.environ.get("PORT", "1000"))
     app.run(host="0.0.0.0", port=port, debug=False)
