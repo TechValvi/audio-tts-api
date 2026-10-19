@@ -1,9 +1,8 @@
 Flask
 flask-cors
-edge-tts>=6.1.19
 gunicorn
 pydub
 imageio-ffmpeg
 audioop-lts
-git+https://github.com/rany2/edge-tts.git
 gTTS
+git+https://github.com/rany2/edge-tts.git
